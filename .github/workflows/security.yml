@@ -1,0 +1,29 @@
+name: security-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Bandit hardened code
+        run: bandit -q -r app -x app/vulnerable.py
+
+      - name: Semgrep informational scan
+        continue-on-error: true
+        run: semgrep --config=p/python --config=p/security-audit app
