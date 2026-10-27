@@ -1,3 +1,6 @@
+
+    
+  
 import json
 from datetime import datetime, timezone
 
@@ -83,94 +86,15 @@ def secure_report(
     state = normalize_filter(state)
     age_band = normalize_filter(age_band)
 
-    clauses = []
-    params = []
-
-    for column, value in [
-        ("department", department),
-        ("state", state),
-        ("age_band", age_band),
-    ]:
-        if value is not None:
-            clauses.append(f"{column} = %s")
-            params.append(value)
-
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-
+    # Use a fixed SQL statement and bind every user-supplied value as a parameter.
+    # A NULL filter means "do not restrict on this field".
     with connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
+                """
                 SELECT
                     COUNT(*) AS cohort_size,
                     ROUND(AVG(salary), 2) AS average_salary,
                     SUM(CASE WHEN security_training_complete THEN 1 ELSE 0 END)
                         AS training_complete
-                FROM employee_facts
-                {where}
-                """,
-                params,
-            )
-            row = cur.fetchone()
 
-    audit(
-        "AGGREGATE_QUERY",
-        "anonymous",
-        {
-            "department": department,
-            "state": state,
-            "age_band": age_band,
-            "cohort_size": row["cohort_size"],
-        },
-    )
-
-    if not cohort_is_safe(row["cohort_size"]):
-        return {
-            "suppressed": True,
-            "cohort_size": row["cohort_size"],
-            "minimum_required": MIN_COHORT_SIZE,
-            "message": "Aggregate suppressed to reduce inference risk.",
-        }
-
-    return {"suppressed": False, **row}
-
-
-@router.get("/schema")
-def secure_schema(authorization: str | None = Header(default=None)):
-    session = require_session(authorization)
-
-    schema = {
-        "employee_facts": [
-            "department",
-            "state",
-            "age_band",
-            "salary",
-            "security_training_complete",
-        ]
-    }
-
-    if session["role"] == "admin":
-        schema["audit_log"] = ["event_type", "actor", "details", "created_at"]
-
-    audit(
-        "SCHEMA_ACCESS",
-        session["email"],
-        {"role": session["role"], "objects": list(schema)},
-    )
-
-    return {
-        "role": session["role"],
-        "schema": schema,
-        "note": "Authorization is derived from the server-side session.",
-    }
-
-
-@router.post("/recover")
-def secure_recovery():
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "Knowledge-based recovery is disabled. "
-            "Use a verified reset channel or stronger MFA in production."
-        ),
-    )
